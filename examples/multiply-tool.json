@@ -1,0 +1,24 @@
+{
+  "$schema": "urn:sd.core:schema:ai-tool.1",
+  "name": "multiply",
+  "description": "\nmultiply two integers and returns the result integer",
+  "type": "multiply(a: integer, b: integer) -> integer",
+  "fn_schema": {
+    "properties": {
+      "a": {
+        "title": "A",
+        "type": "integer"
+      },
+      "b": {
+        "title": "B",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "a",
+      "b"
+    ],
+    "title": "multiply",
+    "type": "object"
+  }
+}
