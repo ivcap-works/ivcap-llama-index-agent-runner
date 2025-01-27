@@ -1,4 +1,3 @@
-from time import sleep
 from typing import ClassVar, List
 from fastapi import FastAPI
 from pydantic import Field
@@ -6,28 +5,21 @@ import argparse
 from signal import signal, SIGTERM
 import sys
 import os
-import logging
+from logger import getLogger, service_log_config
 import queue
+from dotenv import load_dotenv
 
 from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
 
-from uvicorn.config import LOGGING_CONFIG
-log_config = LOGGING_CONFIG
+# Load environment variables from the .env file
+load_dotenv()
 
-logger = logging.getLogger("app")
-
-lc = LOGGING_CONFIG.copy()
-lc["loggers"] = {
-    "app": {"level": "DEBUG", "handlers": ["default"]},
-    "ivcap-tool": {"level": "INFO", "handlers": ["default"]},
-    "events": {"level": "INFO", "handlers": ["default"]},
-}
-logging.config.dictConfig(lc)
+logger = getLogger("app")
 
 from events import is_last_event
-from runner import run_chat
-from tool import load_example_tool, resolve_tool
+from runner import run_query
+from tool import resolve_tool
 from utils import SchemaModel, StrEnum
 
 # shutdown pod cracefully
@@ -52,20 +44,18 @@ app = FastAPI(
 )
 
 # Add support for JSON-RPC invocation (https://www.jsonrpc.org/)
-from ivcap_fastapi import use_json_rpc_middleware
-use_json_rpc_middleware(app)
+# from ivcap_fastapi import use_json_rpc_middleware
+# use_json_rpc_middleware(app)
 
 # Add support for TryLaterException
 from ivcap_fastapi import TryLaterException, use_try_later_middleware
 use_try_later_middleware(app)
 
 parser = argparse.ArgumentParser(description=title)
-parser.add_argument('--host', type=str, default=os.environ.get("HOST", "localhost"), help='Host address')
+parser.add_argument('--host', type=str, default=os.environ.get("HOST", "0.0.0.0"), help='Host address')
 parser.add_argument('--port', type=int, default=os.environ.get("PORT", "8080"), help='Port number')
-
 parser.add_argument('--max-wait', type=int, default=30, help='Specifies the max number of seconds to wait for a reply')
-
-parser.add_argument('--testing', type=bool, default=False, help='Add tools for testing (testing.py)')
+parser.add_argument('--testing', action="store_true", help='Add tools for testing (testing.py)')
 
 args = parser.parse_args()
 max_wait = args.max_wait
@@ -92,7 +82,7 @@ def run(req: Request) -> Response:
 
     tools = [resolve_tool(urn) for urn in req.tools]
     agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
-    q, t = run_chat(agent, req.msg)
+    q, _ = run_query(agent, req.msg)
     while True:
         try:
             event = q.get(timeout=3)
@@ -123,9 +113,11 @@ def healtz():
     return {"version": os.environ.get("VERSION", "???")}
 
 if __name__ == "__main__":
+    logger.info(f"{title} - {os.getenv('VERSION')}")
+
     if args.testing:
+        logger.info(f"Adding testing support defined in 'testing.py'")
         import testing  # noqa
 
     import uvicorn
-    logger.info(f"{title} - {os.getenv('VERSION')}")
-    uvicorn.run(app, host=args.host, port=args.port, log_config=log_config)
+    uvicorn.run(app, host=args.host, port=args.port, log_config=service_log_config())

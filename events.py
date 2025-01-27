@@ -175,7 +175,6 @@ class QueryEvent(AgentEvent):
             response=response,
         )
 
-
 class EventHandler(BaseEventHandler):
     @classmethod
     def class_name(cls) -> str:

@@ -6,7 +6,6 @@ import logging
 import queue
 
 from events import is_last_event, unregister_event_queue, register_event_queue
-from tool import load_example_tool
 
 logger = logging.getLogger("runner")
 
@@ -22,7 +21,7 @@ def _run(fn: Callable[[], Any]) -> Tuple[queue.Queue, threading.Thread]:
     def run():
         register_event_queue(q)
         response = fn()
-        logger.info(f" final response: {response}")
+        logger.debug(f"_run final response: {response}")
         q.put(None)
         unregister_event_queue(q)
 
@@ -33,13 +32,20 @@ def _run(fn: Callable[[], Any]) -> Tuple[queue.Queue, threading.Thread]:
 if __name__ == "__main__":
     from llama_index.core.agent import ReActAgent
     from llama_index.llms.openai import OpenAI
+    from dotenv import load_dotenv
+    from tool import load_example_tool, resolve_tool
+    import testing
 
+    load_dotenv()
     logging.basicConfig(level=logging.INFO)
 
     llm = OpenAI(model="gpt-3.5-turbo-instruct")
-    tool = load_example_tool('examples/multiply-tool.json', lambda a, b: a * b)
-    agent = ReActAgent.from_tools([tool], llm=llm, verbose=False)
-    q, t = run_chat(agent, "What is 2 * 5")
+    tools = [
+        load_example_tool('examples/multiply-tool.json', lambda a, b: a * b),
+        resolve_tool("urn:ivcap:service:ai-tool.add")
+    ]
+    agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
+    q, t = run_chat(agent, "What is 2 + 3 * 5")
     while True:
         try:
             event = q.get(timeout=3)
@@ -49,6 +55,6 @@ if __name__ == "__main__":
             q.task_done()
             if is_last_event(event):
                 print(f">>>> Final response: {event.response}")
-                #break
+                break
         except queue.Empty:
             logger.info("eventloop .... timeout")
