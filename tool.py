@@ -5,6 +5,7 @@ from llama_index.core.tools.types import ToolMetadata
 from llama_index.core.tools import BaseTool, FunctionTool
 import os
 import logging
+import requests
 
 TOOL_SCHEMA = "urn:sd.core:schema:ai-tool.1"
 
@@ -37,6 +38,29 @@ def load_example_tool(file_path: str, fn: Callable[..., Any]) -> FunctionTool:
     tool = load_tool_from_json_file(json_file_path)
     override_tool_func(tool.metadata.name, fn)
     return tool
+
+def load_local_url_tool(url: str, file_path: str) -> FunctionTool:
+    script_dir = os.path.dirname(__file__)
+    json_file_path = os.path.join(script_dir, file_path)
+    tool = load_tool_from_json_file(json_file_path)
+
+    def fn(**kwargs):
+        p = tool.metadata.fn_schema(**kwargs)
+        j = p.model_dump_json()
+        h = {"Content-Type": "application/json"}
+        resp = requests.post(url, data=j, headers=h)
+        if resp.status_code < 300:
+            res = resp.json()
+            logger.info("tool request succeeded")
+            return res
+        else:
+            msg = resp.text
+            logger.info(f"tool request failed - {resp.status_code} - {msg}")
+            raise Exception(msg)
+
+    override_tool_func(tool.metadata.name, fn)
+    return tool
+
 
 def register_function_as_tool(fn: Callable[..., Any]) -> FunctionTool:
     tool = FunctionTool.from_defaults(fn=fn)

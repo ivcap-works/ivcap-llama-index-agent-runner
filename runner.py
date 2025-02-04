@@ -15,6 +15,22 @@ def run_chat(agent: AgentRunner, msg: str) -> Tuple[queue.Queue, threading.Threa
 def run_query(agent: AgentRunner, msg: str) -> Tuple[queue.Queue, threading.Thread]:
     return _run(lambda: agent.query(msg))
 
+def wait_for_result(t: Tuple[queue.Queue, threading.Thread]) -> str:
+    q = t[0]
+    while True:
+        try:
+            event = q.get(timeout=3)
+            if event is None:
+                break
+            logger.info(f"event: {event}")
+            q.task_done()
+            if is_last_event(event):
+                return event.response
+        except queue.Empty:
+            logger.info("eventloop .... timeout")
+    return None
+
+
 def _run(fn: Callable[[], Any]) -> Tuple[queue.Queue, threading.Thread]:
     q = queue.Queue()
 
@@ -34,7 +50,8 @@ if __name__ == "__main__":
     from llama_index.llms.openai import OpenAI
     from dotenv import load_dotenv
     from tool import load_example_tool, resolve_tool
-    import testing
+
+    import testing # registers various tools and utilities defined in ./testing.py
 
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
@@ -45,16 +62,5 @@ if __name__ == "__main__":
         resolve_tool("urn:ivcap:service:ai-tool.add")
     ]
     agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
-    q, t = run_chat(agent, "What is 2 + 3 * 5")
-    while True:
-        try:
-            event = q.get(timeout=3)
-            if event is None:
-                break
-            logger.info(f"event: {event}")
-            q.task_done()
-            if is_last_event(event):
-                print(f">>>> Final response: {event.response}")
-                break
-        except queue.Empty:
-            logger.info("eventloop .... timeout")
+    result = wait_for_result(run_query(agent, "What is 2 + 3 * 5"))
+    print(f">>>> Final response: {result}")

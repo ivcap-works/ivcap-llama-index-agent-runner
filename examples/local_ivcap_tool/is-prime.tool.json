@@ -1,0 +1,19 @@
+{
+  "$schema": "urn:sd.core:schema:ai-tool.1",
+  "name": "is-prime",
+  "description": "Checks if a number is a prime number.",
+  "type": "is_prime(number: integer) -> {number: integer, is_prime: bool}",
+  "fn_schema": {
+    "properties": {
+      "number": {
+        "title": "number to check",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "number"
+    ],
+    "title": "is_prime",
+    "type": "object"
+  }
+}
