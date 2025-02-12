@@ -1,5 +1,5 @@
 {
-  "$schema": "urn:sd.core:schema:llama-agent.request.1",
+  "$schema": "urn:sd-core:schema:llama-agent.request.1",
   "id": "urn:sd:crewai:simple",
   "name": "Agent query test",
   "msg": "what is 45 * 98",

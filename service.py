@@ -1,6 +1,9 @@
+from dataclasses import dataclass
 from typing import ClassVar, List
-from fastapi import FastAPI
-from pydantic import Field
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import RedirectResponse, StreamingResponse
+
+from pydantic import BaseModel, Field, ValidationError
 import argparse
 from signal import signal, SIGTERM
 import sys
@@ -17,7 +20,7 @@ load_dotenv()
 
 logger = getLogger("app")
 
-from events import is_last_event
+from events import is_last_event, is_last_query_event
 from runner import run_query
 from tool import resolve_tool
 from utils import SchemaModel, StrEnum
@@ -48,8 +51,8 @@ app = FastAPI(
 # use_json_rpc_middleware(app)
 
 # Add support for TryLaterException
-from ivcap_fastapi import TryLaterException, use_try_later_middleware
-use_try_later_middleware(app)
+# from ivcap_fastapi import TryLaterException, use_try_later_middleware
+# use_try_later_middleware(app)
 
 parser = argparse.ArgumentParser(description=title)
 parser.add_argument('--host', type=str, default=os.environ.get("HOST", "0.0.0.0"), help='Host address')
@@ -64,48 +67,81 @@ class ModeE(StrEnum):
     Chat = "chat"
     Query = "query"
 
-class Request(SchemaModel):
-    SCHEMA: ClassVar[str] = "urn:sd.core:schema:llama-agent.request.1"
+class ServiceRequest(SchemaModel):
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.request.1"
     msg: str = Field(description="The message to a chat or query", examples=["what is 2 * 5"])
     tools: List[str] = Field([], description="The tools to use while processing this request", examples=[["multiply"]])
     mode: ModeE = Field(ModeE.Query, description="specifies if the message is a chat or a query")
     verbose: bool = Field(False, description="Whether to also return events produced during execution")
 
-class Response(SchemaModel):
-    SCHEMA: ClassVar[str] = "urn:sd.core:schema:llama-agent.response.1"
+class ServiceResponse(SchemaModel):
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.response.1"
     response: str = Field(description="The response to a query or chat")
     msg: str = Field(description="The message to a chat or query", examples=["what is 2 * 5"])
 
+@dataclass
+class Job:
+    id: str
+    msg: str
+    queue: queue.Queue
+    result: ServiceResponse = None
+
+jobs:dict[str, Job] = {}
+
 @app.post("/")
-def run(req: Request) -> Response:
+async def run(request: Request) -> ServiceResponse:
+    try:
+        data = await request.json()
+        req = ServiceRequest(**data)
+    except ValueError: # JSONDecodeError is a subclass of ValueError
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON data")
+    except ValidationError as e:  # Catch Pydantic validation errors
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error: {str(e)}")
+
+    jobID = request.headers.get("x-job-uuid")
+    jobURL = request.headers.get("x-job-url")
+
     llm = OpenAI(model="gpt-3.5-turbo-instruct")
 
     tools = [resolve_tool(urn) for urn in req.tools]
     agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
     q, _ = run_query(agent, req.msg)
-    while True:
-        try:
-            event = q.get(timeout=3)
-            if event is None:
-                break
-            logger.debug(f"event: {event}")
-            q.task_done()
-            if is_last_event(event):
-                logger.info(f"Final response: {event.response}")
-                return Response(response=event.response, msg=req.msg)
-                #break
-        except queue.Empty:
-            logger.info("eventloop .... timeout")
+    jobs[jobID] = Job(id = jobID, queue=q, msg=req.msg)
+    return RedirectResponse(jobURL, status_code=status.HTTP_302_FOUND)
 
-    raise Exception("finished without finding a result")
+@app.get("/{job_id}")
+async def get(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job details not found")
 
-# jobs = {}
+    if job.result: # check if already finished
+        return job.result
 
-# @app.get("/jobs/{jobID}")
-# def get_job(jobID: str) -> Response:
-#     req = jobs[jobID]
-#     return work(req)
+    q = job.queue
 
+    async def events():
+        def to_data(ev: BaseModel):
+            s = ev.model_dump_json(by_alias=True)
+            return f"data: {s}\n\n"
+
+        while True:
+            try:
+                event = q.get()
+                logger.debug(f"event: {event}")
+                yield to_data(event)
+                q.task_done()
+                if is_last_query_event(event):
+                    logger.info(f"Final response: {event.response}")
+                    job.result = ServiceResponse(response=event.response, msg=job.msg)
+                    yield to_data(job.result)
+                    break
+            except queue.Empty:
+                logger.info("eventloop .... timeout")
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 # Allows platform to check if everything is OK
 @app.get("/_healtz")

@@ -32,7 +32,7 @@
   },
   "loggers": {
     "app": {
-      "level": "DEBUG"
+      "level": "INFO"
     },
     "uvicorn.access": {
       "handlers": [

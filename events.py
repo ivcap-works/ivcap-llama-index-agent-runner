@@ -1,6 +1,7 @@
 
 from datetime import datetime
-from typing import Any, Dict
+from enum import Enum
+from typing import Any, ClassVar, Dict, Optional
 import llama_index.core.instrumentation as instrument
 
 from llama_index.core.instrumentation.event_handlers.base import BaseEventHandler
@@ -23,6 +24,7 @@ from uuid import UUID, uuid4
 import threading
 import logging
 from queue import Queue
+from utils import SchemaModel
 
 logger = logging.getLogger("events")
 
@@ -31,9 +33,14 @@ def get_events(ctxt_id: str) -> list[BaseEvent]:
 
 def is_last_event(event: BaseEvent) -> bool:
     if isinstance(event, QueryEvent):
-        return True
+        return event.status == Status.FINISHED
     if isinstance(event, ChatEvent):
-        return True
+        return event.status == Status.FINISHED
+    return False
+
+def is_last_query_event(event: BaseEvent) -> bool:
+    if isinstance(event, QueryEvent):
+        return event.status == Status.FINISHED
     return False
 
 def create_event_id() -> UUID:
@@ -51,12 +58,24 @@ def unregister_event_queue(queue: Queue):
 
 ### INTERNAL
 
-class AgentEvent(BaseModel):
+
+class Status(Enum):
+    STARTED = "started"
+    IN_PROGRESS = "in-progress"
+    FINISHED = "finished"
+    ERROR = "error"
+
+span2ctxt: dict[str, any] = {}
+
+class AgentEvent(SchemaModel):
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.agent.1"
+
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         # copy_on_model_validation = "deep"  # not supported in Pydantic V2...
     )
-    type: str
+    id: Optional[str] = ""
+    status: Status
     timestamp: datetime = Field(default_factory=lambda: datetime.now())
 
 class LLMMessage(BaseModel):
@@ -80,12 +99,27 @@ class LLMMessage(BaseModel):
         return cls.from_chat_message(m)
 
 class LLMChatEvent(AgentEvent):
-    type: str = "LLMChatEvent"
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.llm.1"
+
     requests: list[LLMMessage]
-    response: LLMMessage
+    response: Optional[LLMMessage] = None
+
+    @classmethod
+    def from_chat_start_event(cls, e: LLMChatStartEvent):
+        id = str(uuid4())
+        span2ctxt[e.span_id] = id
+        ts = e.timestamp
+        requests = [LLMMessage.from_chat_message(m) for m in e.messages]
+        return cls(
+            id=str(id),
+            status=Status.STARTED,
+            timestamp=ts,
+            requests=requests,
+            response=None)
 
     @classmethod
     def from_chat_end_event(cls, e: LLMChatEndEvent):
+        id = span2ctxt.pop(e.span_id, None)
         ts = e.timestamp
         requests = [LLMMessage.from_chat_message(m) for m in e.messages]
         if isinstance(e.response, ChatResponse):
@@ -93,10 +127,28 @@ class LLMChatEvent(AgentEvent):
         else:
             raise ValueError(f"Unexpected response type: {type(e.response)}")
         return cls(
-            type="LLMChatEvent",
+            id=id,
+            status=Status.FINISHED,
             timestamp=ts,
             requests=requests,
             response=response)
+
+class ToolEvent(AgentEvent):
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.tool.1"
+    tool_name:str
+    arguments: str
+
+    @classmethod
+    def from_tool_event(cls, e: AgentToolCallEvent):
+        id = str(uuid4())
+        ts = e.timestamp
+        return cls(
+            id=id,
+            status=Status.STARTED,
+            ts=ts,
+            tool_name=e.tool.name,
+            arguments=e.arguments,
+        )
 
 class Source(BaseModel):
     content: str
@@ -114,29 +166,42 @@ class Source(BaseModel):
         )
 
 class StepEvent(AgentEvent):
-    response: str
-    sources: list[Source]
-    is_last: bool
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.step.1"
+    response: Optional[str] = None
+    sources: Optional[list[Source]] = None
+    is_last: Optional[bool] = None
+
+    @classmethod
+    def from_step_start_event(cls, e: AgentRunStepStartEvent):
+        id = e.step.step_id # uuid4()
+        span2ctxt[e.span_id] = id
+        ts = e.timestamp
+        return cls._from(id, Status.STARTED, ts)
 
     @classmethod
     def from_step_end_event(cls, e: AgentRunStepEndEvent):
         ts = e.timestamp
         sout = e.step_output
+        id = sout.task_step.step_id
         is_last = sout.is_last
         output = sout.output
-        return cls._from(ts, output, is_last)
-
+        return cls._from(id, Status.FINISHED, ts, output, is_last)
 
     @classmethod
-    def _from(cls, ts: datetime, agent_response: any,  is_last: bool):
-        if isinstance(agent_response, AgentChatResponse):
-            response = agent_response.response
-            sources = [Source.from_tool_output(s) for s in agent_response.sources]
+    def _from(cls, id: UUID, status: Status, ts: datetime, agent_response: Optional[any]=None, is_last: Optional[bool]=None):
+        if agent_response:
+            if isinstance(agent_response, AgentChatResponse):
+                response = agent_response.response
+                sources = [Source.from_tool_output(s) for s in agent_response.sources]
+            else:
+                raise ValueError(f"Unexpected output type: {type(agent_response)}")
         else:
-            raise ValueError(f"Unexpected output type: {type(agent_response)}")
+            response=None
+            sources=None
 
         return cls(
-            type="StepEvent",
+            id=str(id),
+            status=status,
             timestamp=ts,
             response=response,
             sources=sources,
@@ -144,34 +209,70 @@ class StepEvent(AgentEvent):
         )
 
 class ChatEvent(AgentEvent):
-    response: str
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.chat.1"
+    user_msg: str
+    response: Optional[str] = None
+
+    @classmethod
+    def from_chat_start_event(cls, e: AgentChatWithStepStartEvent):
+        ts = e.timestamp
+        id = str(uuid4())
+        ev = cls(
+            id=id,
+            status=Status.STARTED,
+            timestamp=ts,
+            user_msg=e.user_msg,
+        )
+        span2ctxt[e.span_id] = ev
+        return ev
 
     @classmethod
     def from_chat_end_event(cls, e: AgentChatWithStepEndEvent):
+        ctxt = span2ctxt.pop(e.span_id, None)
         ts = e.timestamp
         if isinstance(e.response, AgentChatResponse):
             response = e.response.response
         else:
             raise ValueError(f"Unexpected response type: {type(e.response)}")
         return cls(
-            type="ChatEvent",
+            id=ctxt.id,
+            status=Status.FINISHED,
             timestamp=ts,
+            user_msg=ctxt.user_msg,
             response=response,
         )
 
 class QueryEvent(AgentEvent):
-    response: str
+    SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.query.1"
+    query: str
+    response: Optional[str] = None
+
+    @classmethod
+    def from_query_start_event(cls, e: QueryStartEvent):
+        id = str(uuid4())
+        ts = e.timestamp
+        ev = cls(
+            id=id,
+            status=Status.STARTED,
+            timestamp=ts,
+            query=e.query
+        )
+        span2ctxt[e.span_id] = ev
+        return ev
 
     @classmethod
     def from_query_end_event(cls, e: QueryEndEvent):
+        ctxt = span2ctxt.pop(e.span_id, None)
         ts = e.timestamp
         if isinstance(e.response, Response):
             response = e.response.response
         else:
             raise ValueError(f"Unexpected response type: {type(e.response)}")
         return cls(
-            type="QueryEvent",
+            id=ctxt.id,
+            status=Status.FINISHED,
             timestamp=ts,
+            query=ctxt.query,
             response=response,
         )
 
@@ -227,26 +328,30 @@ class EventHandler(BaseEventHandler):
                 logger.warning(f"handler: Queue not found: {qid}")
 
     def _process_event(self, event: BaseEvent) -> AgentEvent:
+        if isinstance(event, LLMChatStartEvent):
+            return LLMChatEvent.from_chat_start_event(event)
         if isinstance(event, LLMChatEndEvent):
             return LLMChatEvent.from_chat_end_event(event)
+
+        if isinstance(event, AgentToolCallEvent):
+            return ToolEvent.from_tool_event(event)
+
+        if isinstance(event, AgentRunStepStartEvent):
+            return StepEvent.from_step_start_event(event)
         if isinstance(event, AgentRunStepEndEvent):
             return StepEvent.from_step_end_event(event)
+
+        if isinstance(event, AgentChatWithStepStartEvent):
+            return ChatEvent.from_chat_start_event(event)
         if isinstance(event, AgentChatWithStepEndEvent):
             return ChatEvent.from_chat_end_event(event)
+
+        if isinstance(event, QueryStartEvent):
+            return QueryEvent.from_query_start_event(event)
         if isinstance(event, QueryEndEvent):
             return QueryEvent.from_query_end_event(event)
 
         # ignore these events
-        if isinstance(event, AgentToolCallEvent):
-            return None
-        if isinstance(event, AgentRunStepStartEvent):
-            return None
-        if isinstance(event, AgentChatWithStepStartEvent):
-            return
-        if isinstance(event, LLMChatStartEvent):
-            return None
-        if isinstance(event, QueryStartEvent):
-            return None
         if isinstance(event, SpanDropEvent):
             return None
 

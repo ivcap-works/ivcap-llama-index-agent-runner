@@ -68,13 +68,31 @@ target to use curl to send such request. In a different terminal, issue the foll
 
 ```
 % make submit-request
-curl -X POST -H "Content-Type: application/json" -d @/Users/ott030/src/IVCAP/Services/ivcap-lli-ReActAgent/examples/simple_query.json http://localhost:8096
-date: Mon, 27 Jan 2025 04:58:59 GMT
+curl -i -X POST \
+                -H "Content-Type: application/json" \
+                -H "X-Job-UUID: 00000000-0000-0000-0000-000000000000" \
+                -H "X-Job-URL: http://localhost:8096/00000000-0000-0000-0000-000000000000" \
+                -d @./examples/simple_query.json http://localhost:8096
+HTTP/1.1 302 Found
+date: Wed, 12 Feb 2025 03:53:36 GMT
 server: uvicorn
-content-length: 97
-content-type: application/json
+content-length: 0
+location: http://localhost:8096/00000000-0000-0000-0000-000000000000
 
-{"$schema":"urn:sd.core:schema:llama-agent.response.1","response":"4410","msg":"what is 45 * 98"}
+curl -i --no-buffer -N http://localhost:8096/00000000-0000-0000-0000-000000000000
+HTTP/1.1 200 OK
+date: Wed, 12 Feb 2025 03:53:36 GMT
+server: uvicorn
+content-type: text/event-stream; charset=utf-8
+transfer-encoding: chunked
+
+data: {"$schema":"urn:sd-core:schema:llama-agent.event.query.1","id":"d5cbd0c7-edf1-4c0a-914c-62ac80408381","status":"started","timestamp":"2025-02-12T14:53:36.655582","query":"what is 45 * 98","response":null}
+
+data: {"$schema":"urn:sd-core:schema:llama-agent.event.chat.1","id":"31f7f790-a49f-421c-9761-b10f19f2b4d6","status":"started","timestamp":"2025-02-12T14:53:36.656335","user_msg":"what is 45 * 98","response":null}
+
+...
+
+data: {"$schema":"urn:sd-core:schema:llama-agent.response.1","response":"4410","msg":"what is 45 * 98"}
 ```
 
 ## Build & Deploy Service <a name="build-deployment"></a>

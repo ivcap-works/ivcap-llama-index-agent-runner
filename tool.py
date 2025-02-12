@@ -7,7 +7,7 @@ import os
 import logging
 import requests
 
-TOOL_SCHEMA = "urn:sd.core:schema:ai-tool.1"
+TOOL_SCHEMA = "urn:sd-core:schema:ai-tool.1"
 
 logger = logging.getLogger("ivcap-tool")
 

@@ -46,7 +46,7 @@ a well documented python function.
 
 ```
 {
-  "$schema": "urn:sd.core:schema:ai-tool.1",
+  "$schema": "urn:sd-core:schema:ai-tool.1",
   "name": "is-prime",
   "description": "Checks if a number is a prime number.",
   "type": "is_prime(number: integer) -> {number: integer, is_prime: bool}",

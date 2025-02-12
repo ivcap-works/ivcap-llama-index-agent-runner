@@ -1,7 +1,6 @@
 import threading
 from typing import Any, Callable, Tuple
 from llama_index.core.agent.runner.base import AgentRunner
-import asyncio
 import logging
 import queue
 
