@@ -1,11 +1,18 @@
+from datetime import datetime
 import json
-from typing import Callable, Optional, List, Any
+from typing import Awaitable, Callable, Optional, List, Any
+from uuid import uuid4
+import aiohttp
+from fastapi import HTTPException, status
 from llama_index.core.bridge.pydantic import BaseModel, create_model, Field
 from llama_index.core.tools.types import ToolMetadata
 from llama_index.core.tools import BaseTool, FunctionTool
+
 import os
 import logging
 import requests
+
+from events import ToolEvent
 
 TOOL_SCHEMA = "urn:sd-core:schema:ai-tool.1"
 
@@ -24,80 +31,109 @@ tools: dict[str, BaseTool] = {}
 def resolve_tool(urn: str) -> BaseTool:
     if urn in tools:
         return tools[urn]
-    raise ValueError(f"Tool '{urn}' not found")
+
+    if urn.startswith("http://localhost"):
+        # for debugging we support loading metadata from local tools
+        r = requests.get(urn)
+        j = r.json()
+        return register_url_tool(urn, j)
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tool '{urn}' not found\n")
 
 def load_tool_from_json_file(file_path: str) -> FunctionTool:
     with open(file_path, 'r') as file:
         j = json.load(file)
-        tool = _load_tool_from_dict(j)
+        tool = _load_tool_from_json(j)
         return tool
 
-def load_example_tool(file_path: str, fn: Callable[..., Any]) -> FunctionTool:
-    script_dir = os.path.dirname(__file__)
-    json_file_path = os.path.join(script_dir, file_path)
-    tool = load_tool_from_json_file(json_file_path)
-    override_tool_func(tool.metadata.name, fn)
-    return tool
 
 def load_local_url_tool(url: str, file_path: str) -> FunctionTool:
-    script_dir = os.path.dirname(__file__)
-    json_file_path = os.path.join(script_dir, file_path)
-    tool = load_tool_from_json_file(json_file_path)
+   with open(file_path, 'r') as file:
+        j = json.load(file)
+        return register_url_tool(url, j)
 
-    def fn(**kwargs):
-        p = tool.metadata.fn_schema(**kwargs)
-        j = p.model_dump_json()
-        h = {"Content-Type": "application/json"}
-        resp = requests.post(url, data=j, headers=h)
-        if resp.status_code < 300:
-            res = resp.json()
-            logger.info("tool request succeeded")
-            return res
-        else:
-            msg = resp.text
-            logger.info(f"tool request failed - {resp.status_code} - {msg}")
-            raise Exception(msg)
+def register_url_tool(url: str, description: dict) -> FunctionTool:
+    md = _load_meta_from_json(description)
 
-    override_tool_func(tool.metadata.name, fn)
-    return tool
+    async def afn(**kwargs):
+        span_id = ToolEvent.dispatch_tool_start(md.name, **kwargs)
+        if kwargs.get("properties") and kwargs.get("type") == "object":
+            err = TypeError("arguments are of wrong type and format")
+            ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
+            raise err
+        p = md.fn_schema(**kwargs)
+        j = p.model_dump()
 
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url, json=j) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        ToolEvent.dispatch_tool_end(span_id, data, md.name, **kwargs)
+                        return data
+                    else:
+                        err = HTTPException(status_code=response.status, detail="tool reply")
+                        ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
+                        raise err
+            except Exception as e: # Catch any other error
+                ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
+                raise e
+
+    tool = FunctionTool(metadata=md, async_fn=afn)
+    return _register_function_tool(tool)
 
 def register_function_as_tool(fn: Callable[..., Any]) -> FunctionTool:
     tool = FunctionTool.from_defaults(fn=fn)
-    return register_function_tool(tool)
+    tool._fn = _wrap(tool.metadata.name, fn)
+    return _register_function_tool(tool)
 
-def override_tool_func(name: str, fn: Callable[..., Any]):
-    override_fns[name] = fn
+### INTERNAL
 
-def register_function_tool(tool: FunctionTool) -> FunctionTool:
+def _register_function_tool(tool: FunctionTool) -> FunctionTool:
     name = tool.metadata.name
     tools[name] = tool
     if not name.startswith("urn:ivcap:service:ai-tool."):
         tools["urn:ivcap:service:ai-tool." + name] = tool
     return tool
 
-### INTERNAL
+def _wrap(name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
+    def w(**kwargs):
+        try:
+            span_id = ToolEvent.dispatch_tool_start(name, **kwargs)
+            data = fn(**kwargs)
+            ToolEvent.dispatch_tool_end(span_id, data, name, **kwargs)
+            return data
+        except Exception as e: # Catch any other error
+            ToolEvent.dispatch_tool_error(span_id, e, name, **kwargs)
+            raise e
+    return w
 
-def _load_tool_from_dict(d: dict) -> FunctionTool:
+def _load_tool_from_json(d: dict) -> FunctionTool:
+    md = _load_meta_from_json(d)
+
+    def tool_proxy(**kwargs):
+        md.fn_schema(**kwargs) # verify what's being passed in
+        if md.name in override_fns:
+            return override_fns[md.name](**kwargs)
+
+        raise NotImplementedError(f"Function '{md.name}' not implemented")
+
+    tool = FunctionTool(tool_proxy, md)
+    return _register_function_tool(tool)
+
+def _load_meta_from_json(d: dict) -> ToolMetadata:
     td = ToolDefinition(**d)
     if td.jschema != TOOL_SCHEMA:
         raise ValueError(f"Invalid schema: expected \'{TOOL_SCHEMA}\' but got \'{td.jschema}\'")
     fn_schema = _create_pydantic_model_from_schema(td.fn_schema, td.name)
 
-    def tool_proxy(**kwargs):
-        fn_schema(**kwargs) # verify what's being passed in
-        if td.name in override_fns:
-            return override_fns[td.name](**kwargs)
-
-        raise NotImplementedError(f"Function '{td.name}' not implemented")
-
     md = ToolMetadata(
         name=td.name,
-        description=f"{td.type}\n${td.description}",
+        description=f"{td.type}\n{td.description}",
         fn_schema=fn_schema,
     )
-    tool = FunctionTool(tool_proxy, md)
-    return register_function_tool(tool)
+    return md
+
 
 def _create_pydantic_model_from_schema(schema: dict, model_name: str) -> Any:
     """Creates a Pydantic model from a JSON schema definition."""
@@ -159,6 +195,13 @@ def _create_pydantic_model_from_schema(schema: dict, model_name: str) -> Any:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
+
+    def load_example_tool(file_path: str, fn: Callable[..., Any]) -> FunctionTool:
+        with open(file_path, 'r') as file:
+            j = json.load(file)
+            md = _load_meta_from_json(j)
+            tool = FunctionTool(metadata=md, fn=_wrap(md.name, fn))
+            return _register_function_tool(tool)
 
     tool = load_example_tool('examples/multiply-tool.json', lambda a, b: a * b)
     r = tool.call(a=5, b=2)

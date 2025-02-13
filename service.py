@@ -103,8 +103,8 @@ async def run(request: Request) -> ServiceResponse:
     jobID = request.headers.get("x-job-uuid")
     jobURL = request.headers.get("x-job-url")
 
-    llm = OpenAI(model="gpt-3.5-turbo-instruct")
-
+    #llm = OpenAI(model="gpt-3.5-turbo-instruct")
+    llm = OpenAI(model="gpt-4-turbo")
     tools = [resolve_tool(urn) for urn in req.tools]
     agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
     q, _ = run_query(agent, req.msg)
@@ -124,12 +124,12 @@ async def get(job_id: str):
 
     async def events():
         def to_data(ev: BaseModel):
-            s = ev.model_dump_json(by_alias=True)
+            s = ev.model_dump_json(by_alias=True, exclude_none=True)
             return f"data: {s}\n\n"
 
         while True:
             try:
-                event = q.get()
+                event = await q.get()
                 logger.debug(f"event: {event}")
                 yield to_data(event)
                 q.task_done()

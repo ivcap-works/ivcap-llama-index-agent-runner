@@ -3,8 +3,9 @@ from typing import Any, Callable, Tuple
 from llama_index.core.agent.runner.base import AgentRunner
 import logging
 import queue
+import asyncio
 
-from events import is_last_event, unregister_event_queue, register_event_queue
+from events import is_last_event, register_event_handler, unregister_event_handler
 
 logger = logging.getLogger("runner")
 
@@ -31,14 +32,19 @@ def wait_for_result(t: Tuple[queue.Queue, threading.Thread]) -> str:
 
 
 def _run(fn: Callable[[], Any]) -> Tuple[queue.Queue, threading.Thread]:
-    q = queue.Queue()
+    q = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
 
     def run():
-        register_event_queue(q)
+        def ev_handler(ev):
+            asyncio.run_coroutine_threadsafe(q.put(ev), loop)
+
+        register_event_handler(ev_handler)
         response = fn()
         logger.debug(f"_run final response: {response}")
-        q.put(None)
-        unregister_event_queue(q)
+        ev_handler(None)
+        unregister_event_handler(ev_handler)
 
     thread = threading.Thread(target=run)
     thread.start()

@@ -1,9 +1,13 @@
 import os
 import sys
-top_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+from time import sleep
+
+from fastapi.responses import FileResponse
+this_dir = os.path.dirname(__file__)
+top_dir = os.path.abspath(os.path.join(this_dir, "../.."))
 sys.path.append(top_dir)
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from signal import signal, SIGTERM
 
 from logger import getLogger, service_log_config
@@ -37,28 +41,32 @@ app = FastAPI(
     root_path=os.environ.get("IVCAP_ROOT_PATH", "")
 )
 
-class Request(BaseModel):
-    number: int = Field(description="number to check")
+###
+# A more complex tool may want to define a ServiceRequest and ServiceResponse model
 
-class Response(BaseModel):
-    number: int= Field(description="number to check if prime")
-    is_prime: bool = Field(description="true if number is prime, false otherwise")
+# class ServiceRequest(BaseModel):
+#     number: int = Field(description="number to check")
+
+# class ServiceResponse(BaseModel):
+#     number: int= Field(description="number to check if prime")
+#     is_prime: bool = Field(description="true if number is prime, false otherwise")
+
+# @app.post("/")
+# def run(req: ServiceRequest) -> ServiceResponse:
+#     """
+#     Checks if a number is prime.
+#
+#     Args:
+#         req (Props): containing the number to check
+#
+#     Returns:
+#         a Response object
+#     """
+#     res = is_prime(req.number) # may want to check if the parameters are as expected
+#     return ServiceResponse(number=req.number, is_prime=res)
 
 @app.post("/")
-def run(req: Request) -> Response:
-    """
-    Checks if a number is prime.
-
-    Args:
-        req (Props): containing the number to check
-
-    Returns:
-        a Response object
-    """
-    res = is_prime(req.number) # may want to check if the parameters are as expected
-    return Response(number=req.number, is_prime=res)
-
-def is_prime(number: int) -> bool:
+def is_prime(number: int = Body(..., embed=True)) -> bool:
     """
     Checks if a number is prime.
 
@@ -80,6 +88,12 @@ def is_prime(number: int) -> bool:
             return False
 
     return True
+
+
+@app.get("/")
+def get_metadata():
+    fp = os.path.join(this_dir, 'is-prime.tool.json')
+    return FileResponse(fp, media_type="application/json")
 
 # Allows platform to check if everything is OK
 @app.get("/_healtz")

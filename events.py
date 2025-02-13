@@ -1,7 +1,8 @@
 
+from __future__ import annotations
 from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, Callable, ClassVar, Dict, ForwardRef, Optional, TypeAlias
 import llama_index.core.instrumentation as instrument
 
 from llama_index.core.instrumentation.event_handlers.base import BaseEventHandler
@@ -14,6 +15,7 @@ from llama_index.core.instrumentation.events.query import QueryStartEvent, Query
 from llama_index.core.instrumentation.events.span import SpanDropEvent
 from llama_index.core.tools import ToolOutput
 from llama_index.core.base.response.schema import Response
+from llama_index.core.base.base_query_engine import dispatcher
 from llama_index.core.instrumentation.events.llm import (
     LLMChatEndEvent, ChatMessage, ChatResponse, LLMChatStartEvent
 )
@@ -23,10 +25,11 @@ from llama_index.core.bridge.pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID, uuid4
 import threading
 import logging
-from queue import Queue
 from utils import SchemaModel
 
 logger = logging.getLogger("events")
+
+EventHandler = Callable[["AgentEvent"], None]
 
 def get_events(ctxt_id: str) -> list[BaseEvent]:
     return _event_handler.get_events(ctxt_id)
@@ -46,15 +49,15 @@ def is_last_query_event(event: BaseEvent) -> bool:
 def create_event_id() -> UUID:
     return _event_handler.create_event_id()
 
-def create_event_queue() -> Queue:
-    return _event_handler.create_event_queue()
+def dispatch_event(ev: AgentEvent):
+    _event_handler.event(ev)
 
-def register_event_queue(queue: Queue) -> Queue:
-    """use 'queue' to report all events issued on this particular thread"""
-    return _event_handler.register_event_queue(queue)
+def register_event_handler(ev_handler: EventHandler) -> EventHandler:
+    """use 'ev_handler' to report all events issued on this particular thread"""
+    return _event_handler.register_event_handler(ev_handler)
 
-def unregister_event_queue(queue: Queue):
-    _event_handler.unregister_event_queue(queue)
+def unregister_event_handler(ev_handler: EventHandler):
+    _event_handler.unregister_event_handler(ev_handler)
 
 ### INTERNAL
 
@@ -137,6 +140,8 @@ class ToolEvent(AgentEvent):
     SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.tool.1"
     tool_name:str
     arguments: str
+    response: Optional[any] = None
+    error: Optional[str] = None
 
     @classmethod
     def from_tool_event(cls, e: AgentToolCallEvent):
@@ -149,6 +154,37 @@ class ToolEvent(AgentEvent):
             tool_name=e.tool.name,
             arguments=e.arguments,
         )
+
+    @classmethod
+    def dispatch_tool_start(cls, tool_name, **kwargs) -> str:
+        id = str(uuid4())
+        ev = cls(
+                id=id,
+                status=Status.STARTED,
+                tool_name=tool_name,
+                arguments=str(kwargs))
+        _event_handler.event(ev)
+        return id
+
+    @classmethod
+    def dispatch_tool_end(cls, id, response, tool_name, **kwargs):
+        ev = cls(
+                id=id,
+                response=response,
+                status=Status.FINISHED,
+                tool_name=tool_name,
+                arguments=str(kwargs))
+        _event_handler.event(ev)
+
+    @classmethod
+    def dispatch_tool_error(cls, id, err, tool_name, **kwargs):
+        ev = cls(
+                id=id,
+                status=Status.ERROR,
+                error=str(err),
+                tool_name=tool_name,
+                arguments=str(kwargs))
+        _event_handler.event(ev)
 
 class Source(BaseModel):
     content: str
@@ -284,7 +320,7 @@ class EventHandler(BaseEventHandler):
     def __init__(self):
         super().__init__()
         self._events = {}
-        self._queues = {}
+        self._ev_handlers = {}
         self._thread_local = threading.local()
 
     def get_events(self, thread_id: str) -> list[AgentEvent]:
@@ -295,20 +331,16 @@ class EventHandler(BaseEventHandler):
         self._thread_local.eid = eid
         return eid
 
-    def create_event_queue(self) -> Queue:
-        queue = Queue()
-        return self.register_event_queue(queue)
-
-    def register_event_queue(self, queue: Queue) -> Queue:
+    def register_event_handler(self, ev_handler: EventHandler) -> EventHandler:
         qid = uuid4()
         self._thread_local.qid = qid
-        self._queues[qid] = queue
-        return queue
+        self._ev_handlers[qid] = ev_handler
+        return ev_handler
 
-    def unregister_event_queue(self, queue: Queue):
-        for qid, q in self._queues.items():
-            if q == queue:
-                del self._queues[qid]
+    def unregister_event_handler(self, ev_handler: EventHandler):
+        for qid, q in self._ev_handlers.items():
+            if q == ev_handler:
+                del self._ev_handlers[qid]
                 break
 
     def handle(self, event: BaseEvent, **kwargs):
@@ -318,14 +350,18 @@ class EventHandler(BaseEventHandler):
             logger.error(f"handler: processing event: {e}")
             return
         if ev is None: return
+        self.event(ev)
 
+    def event(self, ev: AgentEvent):
         qid = getattr(self._thread_local, "qid", None)
         if qid is not None:
-            queue = self._queues.get(qid, None)
-            if queue is not None:
-                queue.put(ev)
+            ev_handler = self._ev_handlers.get(qid, None)
+            if ev_handler is not None:
+                #asyncio.run_coroutine_threadsafe(ev_handler.put(ev), asyncio.get_running_loop())
+                # ev_handler.put(ev)
+                ev_handler(ev)
             else:
-                logger.warning(f"handler: Queue not found: {qid}")
+                logger.warning(f"handler: EventHandler not found: {qid}")
 
     def _process_event(self, event: BaseEvent) -> AgentEvent:
         if isinstance(event, LLMChatStartEvent):
@@ -334,7 +370,8 @@ class EventHandler(BaseEventHandler):
             return LLMChatEvent.from_chat_end_event(event)
 
         if isinstance(event, AgentToolCallEvent):
-            return ToolEvent.from_tool_event(event)
+            # return ToolEvent.from_tool_event(event)
+            return None # we now handle that directly
 
         if isinstance(event, AgentRunStepStartEvent):
             return StepEvent.from_step_start_event(event)

@@ -1,0 +1,10 @@
+{
+  "$schema": "urn:sd-core:schema:llama-agent.request.1",
+  "id": "urn:sd:crewai:simple",
+  "name": "Agent query test",
+  "msg": "is 997 a prime number?",
+  "tools": [
+    "http://localhost:8090"
+  ],
+  "verbose": true
+}

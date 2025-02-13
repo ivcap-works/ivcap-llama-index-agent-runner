@@ -19,13 +19,21 @@ DOCKER_TAG_LOCAL=${DOCKER_NAME}:latest
 PROJECT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 TARGET_PLATFORM := linux/amd64
 RUN_DIR:=${PROJECT_DIR}/RUN
-
+SERVICE_URL=http://localhost:8096
 run:
 	env VERSION=$(VERSION) \
 		python ${PROJECT_DIR}/tool-service.py
 
 test-local:
 	curl -X POST -H "content-type: application/json" --data "{\"number\": 997}" http://localhost:8090
+
+submit-request:
+	curl -i -X POST \
+		-H "Content-Type: application/json" \
+		-H "X-Job-UUID: 00000000-0000-0000-0000-000000000000" \
+		-H "X-Job-URL: ${SERVICE_URL}/00000000-0000-0000-0000-000000000000" \
+		-d @${PROJECT_DIR}/test_query.json ${SERVICE_URL}
+	curl -i --no-buffer -N ${SERVICE_URL}/00000000-0000-0000-0000-000000000000
 
 install:
 	pip install -r requirements.txt
