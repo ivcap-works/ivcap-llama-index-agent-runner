@@ -1,8 +1,8 @@
 {
   "$schema": "urn:ivcap:schema:service.2",
   "id": "#SERVICE_ID#",
-  "name": "is-prime-tool",
-  "description": "AI tool to help determining if a number is a prime number.",
+  "name": "llamaIndex-agent-runner",
+  "description": "Executes queries or chats with LlamaIndex agents.",
   "parameters": [],
   "policy": "urn:ivcap:policy:ivcap.open.service",
   "controller-schema": "urn:ivcap:schema.service.rest.1",
@@ -12,7 +12,7 @@
     "port": 8090,
     "command": [
       "python",
-      "/app/tool-service.py"
+      "/app/service.py"
     ],
     "resources": {
       "limits": {

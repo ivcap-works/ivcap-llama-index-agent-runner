@@ -105,6 +105,15 @@ def tool_to_ivcap_definition(tool: FunctionTool) -> ToolDefinition:
         fn_schema=md.fn_schema.model_json_schema()
     )
 
+def dump_builtin_ivcap_definitions(dir: str = "ivcap"):
+    for t in builtinTools:
+        md = t.metadata
+        fn = f"{dir}/{md.name}.tool.json"
+        logger.info(f"Write IVCAP tool definition for '{md.name}' to '{fn}'")
+        td = tool_to_ivcap_definition(t)
+        with open(fn, 'w') as file:
+            file.write(td.model_dump_json(indent=2, by_alias=True))
+
 ### INTERNAL
 
 def _register_function_tool(tool: FunctionTool, name: Optional[str]=None) -> FunctionTool:

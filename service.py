@@ -59,6 +59,7 @@ parser = argparse.ArgumentParser(description=title)
 parser.add_argument('--host', type=str, default=os.environ.get("HOST", "0.0.0.0"), help='Host address')
 parser.add_argument('--port', type=int, default=os.environ.get("PORT", "8080"), help='Port number')
 parser.add_argument('--max-wait', type=int, default=30, help='Specifies the max number of seconds to wait for a reply')
+parser.add_argument('--dump-builtin-ivcap-definitions', type=str, help='Write an IVCAP toold description for every builtin tool')
 parser.add_argument('--testing', action="store_true", help='Add tools for testing (testing.py)')
 
 args = parser.parse_args()
@@ -151,6 +152,12 @@ def healtz():
 
 if __name__ == "__main__":
     logger.info(f"{title} - {os.getenv('VERSION')}")
+
+    if args.dump_builtin_ivcap_definitions:
+        from tool import dump_builtin_ivcap_definitions
+        dir = args.dump_builtin_ivcap_definitions
+        dump_builtin_ivcap_definitions(dir)
+        exit(0)
 
     if args.testing:
         logger.info(f"Adding testing support defined in 'testing.py'")

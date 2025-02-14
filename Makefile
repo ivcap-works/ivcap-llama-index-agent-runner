@@ -2,6 +2,7 @@ SERVICE_NAME=llama-index-agent-runner
 SERVICE_TITLE=LLamaIndex Agent Runner
 
 SERVICE_FILE=service.py
+IVCAP_SERVICE_FILE=ivcap.service.json
 PROVIDER_NAME=sc.experimental
 
 SERVICE_ID:=ivcap:service:$(shell python3 -c 'import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, \
@@ -29,12 +30,6 @@ MAX_WAIT=10
 run:
 	env VERSION=$(VERSION) \
 	python service.py --host ${HOST} --port ${PORT} --max-wait ${MAX_WAIT} --testing
-
-# run-http:
-# 	mkdir -p ${RUN_DIR} && rm -f ${RUN_DIR}/log.txt
-# 	env IVCAP_OUT_DIR=${RUN_DIR} \
-# 	python ${SERVICE_FILE} \
-# 		--ivcap:service-url ${SERVICE_URL}
 
 submit-request:
 	curl -i -X POST \
@@ -80,10 +75,7 @@ docker-debug: #docker-build
 		${DOCKER_TAG_LOCAL}
 
 docker-build:
-	@echo "Building docker image ${DOCKER_NAME}"
-	@echo "====> DOCKER_REGISTRY is ${DOCKER_REGISTRY}"
-	@echo "====> LOCAL_DOCKER_REGISTRY is ${LOCAL_DOCKER_REGISTRY}"
-	@echo "====> TARGET_PLATFORM is ${TARGET_PLATFORM}"
+	@echo "INFO: Building docker image '${DOCKER_NAME}' for paltform '${TARGET_PLATFORM}'"
 	DOCKER_BUILDKIT=1 docker build \
 		-t ${DOCKER_NAME} \
 		--platform=${TARGET_PLATFORM} \
@@ -92,7 +84,51 @@ docker-build:
 		--build-arg BUILD_DATE="$(shell date -Iminutes)" \
 		-f ${PROJECT_DIR}/Dockerfile \
 		${PROJECT_DIR} ${DOCKER_BILD_ARGS}
-	@echo "\nFinished building docker image ${DOCKER_NAME}\n"
+	@echo "\nINFO: Finished building docker image '${DOCKER_NAME}'\n"
+
+service-register: tools-register
+	$(eval account_id=$(shell ivcap context get account-id))
+	@if [[ ${account_id} != urn:ivcap:account:* ]]; then echo "ERROR: No IVCAP account found"; exit -1; fi
+	@$(eval service_id:=urn:ivcap:service:$(shell python3 -c 'import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, \
+        "${SERVICE_NAME}" + "${account_id}"));'))
+	@$(eval image:=$(shell ivcap package list ${DOCKER_TAG}))
+	@if [[ -z "${image}" ]]; then echo "ERROR: No uploaded docker image '${DOCKER_TAG}' found"; exit -1; fi
+	@echo "ServiceID: ${service_id}"
+	cat ${PROJECT_DIR}/${IVCAP_SERVICE_FILE} \
+	| sed 's|#DOCKER_IMG#|${image}|' \
+	| sed 's|#SERVICE_ID#|${service_id}|' \
+  | ivcap aspect update ${service_id} -f - --timeout 600
+
+tools-register: docker-build
+	@echo "INFO: Register all builtin tools"
+	$(eval account_id=$(shell ivcap context get account-id))
+	@if [[ ${account_id} != urn:ivcap:account:* ]]; then echo "ERROR: No IVCAP account found"; exit -1; fi
+	@$(eval tmpdir=$(shell  mktemp -d))
+	@docker run --rm -v ${tmpdir}:/tools  ${DOCKER_NAME} --dump-builtin-ivcap-definitions /tools
+	@for file in ${tmpdir}/*; do \
+		id=$$(grep "\"id\":" $$file | cut -d\" -f 4 ); \
+		echo "INFO: Registering built in tool '$$id'"; \
+		ivcap aspect update $$id -f $$file; \
+	done
+
+docker-publish: docker-build
+	@echo "INFO: Publishing docker image '${DOCKER_TAG}'"
+	docker tag ${DOCKER_NAME} ${DOCKER_TAG}
+	$(eval size:=$(shell docker inspect ${DOCKER_NAME} --format='{{.Size}}' | tr -cd '0-9'))
+	$(eval imageSize:=$(shell expr ${size} + 0 ))
+	@echo "... imageSize is ${imageSize} (${size})"
+	@$(MAKE) PUSH_FROM="--local " docker-publish-common
+
+docker-publish-common:
+	$(eval log:=$(shell ivcap package push --force ${PUSH_FROM}${DOCKER_TAG} | tee /dev/tty))
+	$(eval SERVICE_IMG := $(shell echo ${log} | sed -E "s/.*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*) pushed/\1/"))
+	@if [ "${SERVICE_IMG}" == "" ] || [ "${SERVICE_IMG}" == "${DOCKER_TAG}" ]; then \
+		echo "service package push failed"; \
+		exit 1; \
+	fi
+	@echo "INFO: Successfully published '${DOCKER_TAG}' as '${SERVICE_IMG}'"
+
+
 
 # docker-run-data-proxy: #docker-build
 # 	rm -rf /tmp/order1
