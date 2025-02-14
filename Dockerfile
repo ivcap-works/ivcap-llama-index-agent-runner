@@ -16,7 +16,7 @@ RUN pip install -r requirements.txt
 # RUN pip install -r requirements-dev.txt --force-reinstall
 
 # Get service files
-ADD service.py runner.py events.py tool.py utils.py logger.py testing.py ./
+ADD service.py runner.py events.py tool.py builtin_tools.py utils.py logger.py testing.py ./
 ADD logging.json ./
 
 # VERSION INFORMATION
