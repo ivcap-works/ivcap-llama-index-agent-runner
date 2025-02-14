@@ -1,10 +1,10 @@
 {
   "$schema": "urn:sd-core:schema:ai-tool.1",
-  "id": "urn:sd-core:llama.builtin.mulInt",
-  "name": "mulInt",
-  "service_id": "urn:sd-core:llama.builtin.mulInt",
-  "description": "Multiply two integers and returns the result integer",
-  "type_signature": "mulInt(a: int, b: int) -> int",
+  "id": "urn:sd-core:llama.builtin.divFloat",
+  "name": "divFloat",
+  "service_id": "urn:sd-core:llama.builtin.divFloat",
+  "description": "Divide two float numbers and returns the result as float",
+  "type_signature": "divFloat(a: int, b: int) -> int",
   "fn_schema": {
     "properties": {
       "a": {
@@ -20,7 +20,7 @@
       "a",
       "b"
     ],
-    "title": "mulInt",
+    "title": "divFloat",
     "type": "object"
   }
 }

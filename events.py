@@ -140,7 +140,7 @@ class ToolEvent(AgentEvent):
     SCHEMA: ClassVar[str] = "urn:sd-core:schema:llama-agent.event.tool.1"
     tool_name:str
     arguments: str
-    response: Optional[any] = None
+    response: Optional[Any] = None
     error: Optional[str] = None
 
     @classmethod

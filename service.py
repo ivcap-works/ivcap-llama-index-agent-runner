@@ -20,10 +20,11 @@ load_dotenv()
 
 logger = getLogger("app")
 
-from events import is_last_event, is_last_query_event
+from events import is_last_query_event
 from runner import run_query
 from tool import resolve_tool
 from utils import SchemaModel, StrEnum
+import builtin_tools # registers all builtin tool
 
 # shutdown pod cracefully
 signal(SIGTERM, lambda _1, _2: sys.exit(0))

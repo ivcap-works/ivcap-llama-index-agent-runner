@@ -1,0 +1,26 @@
+{
+  "$schema": "urn:sd-core:schema:ai-tool.1",
+  "id": "urn:sd-core:llama.builtin.addInt",
+  "name": "addInt",
+  "service_id": "urn:sd-core:llama.builtin.addInt",
+  "description": "Add two integers and returns the result integer\n\n    Args:\n        a: First number\n        b: Second number\n\n    Returns:\n       The addition of the two input numbers\n    ",
+  "type_signature": "addInt(a: int, b: int) -> int",
+  "fn_schema": {
+    "properties": {
+      "a": {
+        "title": "A",
+        "type": "integer"
+      },
+      "b": {
+        "title": "B",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "a",
+      "b"
+    ],
+    "title": "addInt",
+    "type": "object"
+  }
+}

@@ -20,13 +20,16 @@ logger = logging.getLogger("ivcap-tool")
 
 class ToolDefinition(BaseModel):
     jschema: str = Field(default=TOOL_SCHEMA, alias="$schema")
+    id: str
     name: str
+    service_id: str
     description: str
-    type: str
+    type_signature: str
     fn_schema: dict
 
 override_fns: dict[str, Callable[..., Any]] = {}
 tools: dict[str, BaseTool] = {}
+builtinTools: set[FunctionTool] = set()
 
 def resolve_tool(urn: str) -> BaseTool:
     if urn in tools:
@@ -82,17 +85,33 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
     tool = FunctionTool(metadata=md, async_fn=afn)
     return _register_function_tool(tool)
 
-def register_function_as_tool(fn: Callable[..., Any]) -> FunctionTool:
+def register_builtin_tool(fn: Callable[..., Any]) -> FunctionTool:
     tool = FunctionTool.from_defaults(fn=fn)
     tool._fn = _wrap(tool.metadata.name, fn)
-    return _register_function_tool(tool)
+    builtinTools.add(tool)
+    name = f"urn:sd-core:llama.builtin.{tool.metadata.name}"
+    return _register_function_tool(tool, name)
+
+def tool_to_ivcap_definition(tool: FunctionTool) -> ToolDefinition:
+    md = tool.metadata
+    sig, description = md.description.split("\n", 1)
+    id = f"urn:sd-core:llama.builtin.{md.name}"
+    return ToolDefinition(
+        name=md.name,
+        id=id,
+        service_id=id,
+        description=description,
+        type_signature=sig,
+        fn_schema=md.fn_schema.model_json_schema()
+    )
 
 ### INTERNAL
 
-def _register_function_tool(tool: FunctionTool) -> FunctionTool:
-    name = tool.metadata.name
+def _register_function_tool(tool: FunctionTool, name: Optional[str]=None) -> FunctionTool:
+    if not name:
+        name = tool.metadata.name
     tools[name] = tool
-    if not name.startswith("urn:ivcap:service:ai-tool."):
+    if not name.startswith("urn:"):
         tools["urn:ivcap:service:ai-tool." + name] = tool
     return tool
 
@@ -129,7 +148,7 @@ def _load_meta_from_json(d: dict) -> ToolMetadata:
 
     md = ToolMetadata(
         name=td.name,
-        description=f"{td.type}\n{td.description}",
+        description=f"{td.type_signature}\n{td.description}",
         fn_schema=fn_schema,
     )
     return md

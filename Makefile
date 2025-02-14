@@ -41,7 +41,7 @@ submit-request:
 		-H "Content-Type: application/json" \
 		-H "X-Job-UUID: 00000000-0000-0000-0000-000000000000" \
 		-H "X-Job-URL: ${SERVICE_URL}/00000000-0000-0000-0000-000000000000" \
-		-d @${PROJECT_DIR}/examples/is_prime_query.json ${SERVICE_URL}
+		-d @${PROJECT_DIR}/examples/simple_query.json ${SERVICE_URL}
 	curl -i --no-buffer -N ${SERVICE_URL}/00000000-0000-0000-0000-000000000000
 
 run-runner:
