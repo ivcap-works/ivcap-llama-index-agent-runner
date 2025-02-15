@@ -24,7 +24,7 @@ class ToolDefinition(BaseModel):
     name: str
     service_id: str
     description: str
-    type_signature: str
+    fn_signature: str
     fn_schema: dict
 
 override_fns: dict[str, Callable[..., Any]] = {}
@@ -101,7 +101,7 @@ def tool_to_ivcap_definition(tool: FunctionTool) -> ToolDefinition:
         id=id,
         service_id=id,
         description=description,
-        type_signature=sig,
+        fn_signature=sig,
         fn_schema=md.fn_schema.model_json_schema()
     )
 
@@ -157,7 +157,7 @@ def _load_meta_from_json(d: dict) -> ToolMetadata:
 
     md = ToolMetadata(
         name=td.name,
-        description=f"{td.type_signature}\n{td.description}",
+        description=f"{td.fn_signature}\n{td.description}",
         fn_schema=fn_schema,
     )
     return md

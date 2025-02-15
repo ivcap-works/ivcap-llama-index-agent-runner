@@ -4,7 +4,7 @@
   "name": "is-prime",
   "service-id": "#SERVICE_ID#",
   "description": "Checks if a number is a prime number.\n\nArgs:\n number: The number to check.\n\nReturns:True if the number is prime, False otherwise.\n",
-  "type_signature": "is_prime(number: int) -> {number: integer, is_prime: bool}",
+  "fn_signature": "is_prime(number: int) -> {number: integer, is_prime: bool}",
   "fn_schema": {
     "properties": {
       "number": {
