@@ -22,7 +22,7 @@ class ToolDefinition(BaseModel):
     jschema: str = Field(default=TOOL_SCHEMA, alias="$schema")
     id: str
     name: str
-    service_id: str
+    service_id: str= Field(alias="service-id")
     description: str
     fn_signature: str
     fn_schema: dict
@@ -150,7 +150,12 @@ def _load_tool_from_json(d: dict) -> FunctionTool:
     return _register_function_tool(tool)
 
 def _load_meta_from_json(d: dict) -> ToolMetadata:
-    td = ToolDefinition(**d)
+    try:
+        td = ToolDefinition(**d)
+    except Exception as e:
+        logger.warning(f"while parsing tool description '{d.get('id')}' - {e}")
+        raise e
+
     if td.jschema != TOOL_SCHEMA:
         raise ValueError(f"Invalid schema: expected \'{TOOL_SCHEMA}\' but got \'{td.jschema}\'")
     fn_schema = _create_pydantic_model_from_schema(td.fn_schema, td.name)

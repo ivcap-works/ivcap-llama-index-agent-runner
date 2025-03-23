@@ -35,7 +35,6 @@ def _run(fn: Callable[[], Any]) -> Tuple[queue.Queue, threading.Thread]:
     q = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
-
     def run():
         def ev_handler(ev):
             asyncio.run_coroutine_threadsafe(q.put(ev), loop)
@@ -54,18 +53,23 @@ if __name__ == "__main__":
     from llama_index.core.agent import ReActAgent
     from llama_index.llms.openai import OpenAI
     from dotenv import load_dotenv
-    from tool import load_example_tool, resolve_tool
+    from tool import resolve_tool
 
-    import testing # registers various tools and utilities defined in ./testing.py
+    #import testing # registers various tools and utilities defined in ./testing.py
+    import builtin_tools # registers all builtin tool
+
 
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
 
-    llm = OpenAI(model="gpt-3.5-turbo-instruct")
-    tools = [
-        load_example_tool('examples/multiply-tool.json', lambda a, b: a * b),
-        resolve_tool("urn:ivcap:service:ai-tool.add")
-    ]
-    agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
-    result = wait_for_result(run_query(agent, "What is 2 + 3 * 5"))
-    print(f">>>> Final response: {result}")
+    async def main():
+        llm = OpenAI(model="gpt-3.5-turbo-instruct")
+        tools = [
+            resolve_tool("urn:sd-core:llama.builtin.mulInt"),
+            resolve_tool("urn:sd-core:llama.builtin.addInt"),
+        ]
+        agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
+        result = wait_for_result(run_query(agent, "What is 2 + 3 * 5"))
+        print(f">>>> Final response: {result}")
+
+    asyncio.run(main())
