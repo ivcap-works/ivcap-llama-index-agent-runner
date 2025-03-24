@@ -105,14 +105,14 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
         async with httpx.AsyncClient() as client:
             try:
                 headers = { "Timeout": str(IVCAP_SERVICE_TIMEOUT) }
-                logger.debug(f"Calling tool {md.name} with {j}")
+                logger.info(f"Calling tool {md.name} with {j}")
                 response = await client.post(url, json=j, timeout=2 * IVCAP_SERVICE_TIMEOUT, headers=headers)
                 response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
                 result = response.json()
                 if response.status_code == 202:
                     # retry again until result is ready
                     result = await wait_for_result(result, span_id, **kwargs)
-                logger.debug(f"Tool {md.name} returned successfully")
+                logger.info(f"Tool {md.name} returned successfully")
                 ToolEvent.dispatch_tool_end(span_id, result, md.name, **kwargs)
                 return result
 
@@ -132,12 +132,12 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
         delay = d.get("retry-later", 10)
         url = location + "?" + urlencode({"with-result-content": "true"})
         while True:
-            logger.debug(f"Waiting {delay}sec for result for tool {md.name} - {location}")
+            logger.info(f"Waiting {delay}sec for result for tool {md.name} - {location}")
             await asyncio.sleep(delay)
             async with httpx.AsyncClient() as client:
                 try:
                     headers = { "Timeout": str(IVCAP_SERVICE_TIMEOUT) }
-                    logger.debug(f"Fetching result for tool {md.name} - {location}")
+                    logger.info(f"Fetching result for tool {md.name} - {location}")
                     response = await client.get(url, timeout=2 * IVCAP_SERVICE_TIMEOUT, headers=headers)
                     response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
                     job = response.json()
