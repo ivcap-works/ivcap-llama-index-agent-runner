@@ -58,7 +58,15 @@ test-is-prime-minikube:
 	-H "Timeout: 600" \
 	-H "Authorization: Bearer $(shell ivcap context get access-token --refresh-token)" \
 	--data @${PROJECT_DIR}/tests/is_prime.json \
-	http://ivcap.minikube/1/services2/b35153c3-3f66-5ed1-9e33-c46949783575/jobs
+	http://ivcap.minikube/1/services2/${SERVICE_ID}/jobs
+
+test-is-prime-ivcap:
+	curl -i -X POST \
+	-H "content-type: application/json" \
+	-H "Timeout: 600" \
+	-H "Authorization: Bearer $(shell ivcap --context gke-dev context get access-token --refresh-token)" \
+	--data @${PROJECT_DIR}/tests/is_prime.json \
+	https://develop.ivcap.net/1/services2/${SERVICE_ID}/jobs
 
 
 install:

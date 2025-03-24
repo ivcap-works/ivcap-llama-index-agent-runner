@@ -6,5 +6,6 @@
   "tools": [
     "urn:ivcap:service:791b421d-e277-5e59-8a58-4b58559bf812"
   ],
+  "model": "o1-mini",
   "verbose": true
 }

@@ -4,7 +4,7 @@ this_dir = os.path.dirname(__file__)
 src_dir = os.path.abspath(os.path.join(this_dir, "../../src"))
 sys.path.insert(0, src_dir)
 
-from typing import ClassVar, List
+from typing import ClassVar, List, Optional
 from fastapi import FastAPI
 
 from pydantic import BaseModel, Field
@@ -86,6 +86,7 @@ class ServiceRequest(BaseModel):
     jschema: str = Field("urn:sd-core:schema.llama-agent.request.1", alias="$schema")
     msg: str = Field(description="The message to a chat or query", examples=["what is 2 * 5"])
     tools: List[str] = Field([], description="The tools to use while processing this request", examples=[["multiply"]])
+    model: Optional[str] = Field("gpt-4-turbo", description="The model to use for the agent")
     mode: ModeE = Field(ModeE.Query, description="specifies if the message is a chat or a query")
     verbose: bool = Field(False, description="Whether to also return events produced during execution")
 
@@ -98,7 +99,7 @@ async def agent_runner(req: ServiceRequest) -> ServiceResponse:
     """Provides the ability to request a LlamaIndex ReAct agent to execute
     the query or chat requested."""
 
-    llm = create_openai_client("gpt-4-turbo")
+    llm = create_openai_client(req.model)
     tools = [resolve_tool(urn) for urn in req.tools]
     agent = ReActAgent.from_tools(tools, llm=llm, verbose=False)
     response = await agent.aquery(req.msg)

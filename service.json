@@ -1,7 +1,7 @@
 {
-  "$schema": "urn:ivcap:schema:service.2",
-  "id": "#SERVICE_ID#",
-  "name": "llamaIndex-agent-runner",
+  "$schema": "urn:ivcap:schema.service.2",
+  "$id": "#SERVICE_ID#",
+  "name": "llama-index-agent-runner",
   "description": "Executes queries or chats with LlamaIndex agents.",
   "parameters": [],
   "policy": "urn:ivcap:policy:ivcap.open.service",
