@@ -143,6 +143,7 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
                     response = await client.get(url, timeout=2 * IVCAP_SERVICE_TIMEOUT, headers=headers)
                     response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
                     job = response.json()
+                    logger.info(f"... result {response.status_code} - {job}")
                     if response.status_code == 200:
                         status = job.get("status")
                         if status == "succeeded":
