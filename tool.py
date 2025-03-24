@@ -118,12 +118,14 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
 
             except httpx.HTTPStatusError as e:
                 err = HTTPException(status_code=e.response.status, detail="tool reply")
+                logger.info(f"Tool {md.name} failed with {e}")
                 ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
                 raise err
             # except httpx.RequestError as e:
             #     print(f"Request error: {e}")
             #     return None
             except Exception as e:
+                logger.info(f"Tool {md.name} failed with {e}")
                 ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
                 raise e
 
@@ -148,10 +150,12 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
                             return content
 
                 except httpx.HTTPStatusError as e:
+                    logger.info(f"Tool {md.name} failed with {e}")
                     err = HTTPException(status_code=e.response.status, detail="tool reply")
                     ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
                     raise err
                 except Exception as e:
+                    logger.info(f"Tool {md.name} failed with {e}")
                     ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
                     raise e
 
