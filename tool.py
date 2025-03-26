@@ -1,20 +1,27 @@
+import asyncio
 from datetime import datetime
 import json
-from typing import Awaitable, Callable, Optional, List, Any
+from typing import Awaitable, Callable, Dict, Optional, List, Any
 from uuid import uuid4
 import aiohttp
+from urllib.parse import urlencode, quote_plus, urljoin
 from fastapi import HTTPException, status
+import httpx
 from llama_index.core.bridge.pydantic import BaseModel, create_model, Field
 from llama_index.core.tools.types import ToolMetadata
 from llama_index.core.tools import BaseTool, FunctionTool
 
 import os
 import logging
+from pydantic import ConfigDict
 import requests
 
 from events import ToolEvent
 
 TOOL_SCHEMA = "urn:sd-core:schema:ai-tool.1"
+
+IVCAP_BASE_URL = os.environ.get("IVCAP_BASE_URL", "http://ivcap.local")
+IVCAP_SERVICE_TIMEOUT = 5
 
 logger = logging.getLogger("ivcap-tool")
 
@@ -22,10 +29,13 @@ class ToolDefinition(BaseModel):
     jschema: str = Field(default=TOOL_SCHEMA, alias="$schema")
     id: str
     name: str
-    service_id: str
+    service_id: str= Field(alias="service-id")
     description: str
     fn_signature: str
     fn_schema: dict
+
+    model_config = ConfigDict(populate_by_name=True) # Allow using `service_id`
+
 
 override_fns: dict[str, Callable[..., Any]] = {}
 tools: dict[str, BaseTool] = {}
@@ -41,6 +51,9 @@ def resolve_tool(urn: str) -> BaseTool:
         j = r.json()
         return register_url_tool(urn, j)
 
+    if urn.startswith("urn:ivcap:service:"):
+        return load_ivcap_tool(urn)
+
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tool '{urn}' not found\n")
 
 def load_tool_from_json_file(file_path: str) -> FunctionTool:
@@ -51,9 +64,33 @@ def load_tool_from_json_file(file_path: str) -> FunctionTool:
 
 
 def load_local_url_tool(url: str, file_path: str) -> FunctionTool:
-   with open(file_path, 'r') as file:
+    with open(file_path, 'r') as file:
         j = json.load(file)
         return register_url_tool(url, j)
+
+def load_ivcap_tool(urn: str) -> FunctionTool:
+    # "GET", "path": "/1/aspects?include-content=false&limit=10&schema=urn"
+    base_url = IVCAP_BASE_URL
+    params = {
+        "schema": "urn:sd-core:schema:ai-tool.1",
+        "entity": urn,
+        "limit": 1,
+        "include-content": "true",
+    }
+    url = urljoin(base_url, "/1/aspects") + "?" + urlencode(params)
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise Exception(f"fetching description for IVCAP tool failed - {response}")
+
+        items = response.json().get("items", [])
+        if len(items) != 1:
+            raise Exception(f"cannot find description for IVCAP tool '{urn}'")
+        tool_def = items[0].get("content")
+        tool = register_url_tool(urljoin(base_url, f"/1/services2/{urn}/jobs"), tool_def)
+        return tool
+    except requests.exceptions.RequestException as e:
+        print("An error occurred:", e)
 
 def register_url_tool(url: str, description: dict) -> FunctionTool:
     md = _load_meta_from_json(description)
@@ -66,21 +103,66 @@ def register_url_tool(url: str, description: dict) -> FunctionTool:
             raise err
         p = md.fn_schema(**kwargs)
         j = p.model_dump()
-
-        async with aiohttp.ClientSession() as session:
+        if "$schema" in j and j.get("$schema") == None:
+            # $schema are not always set properly
+            del j["$schema"]
+        async with httpx.AsyncClient() as client:
             try:
-                async with session.post(url, json=j) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        ToolEvent.dispatch_tool_end(span_id, data, md.name, **kwargs)
-                        return data
-                    else:
-                        err = HTTPException(status_code=response.status, detail="tool reply")
-                        ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
-                        raise err
-            except Exception as e: # Catch any other error
+                headers = { "Timeout": str(IVCAP_SERVICE_TIMEOUT) }
+                logger.info(f"Calling tool {md.name} with {j}")
+                response = await client.post(url, json=j, timeout=2 * IVCAP_SERVICE_TIMEOUT, headers=headers)
+                response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+                result = response.json()
+                if response.status_code == 202:
+                    # retry again until result is ready
+                    result = await wait_for_result(result, span_id, **kwargs)
+                logger.info(f"Tool {md.name} returned successfully")
+                ToolEvent.dispatch_tool_end(span_id, result, md.name, **kwargs)
+                return result
+
+            except httpx.HTTPStatusError as e:
+                err = HTTPException(status_code=e.response.status, detail="tool reply")
+                logger.info(f"Tool {md.name} failed with {e}")
+                ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
+                raise err
+            # except httpx.RequestError as e:
+            #     print(f"Request error: {e}")
+            #     return None
+            except Exception as e:
+                logger.info(f"Tool {md.name} failed with {e}")
                 ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
                 raise e
+
+    async def wait_for_result(d: Dict, span_id, **kwargs):
+        location = d.get("location")
+        delay = d.get("retry-later", 10)
+        url = location + "?" + urlencode({"with-result-content": "true"})
+        while True:
+            logger.info(f"Waiting {delay}sec for result for tool {md.name} - {location}")
+            await asyncio.sleep(delay)
+            async with httpx.AsyncClient() as client:
+                try:
+                    headers = { "Timeout": str(IVCAP_SERVICE_TIMEOUT) }
+                    logger.info(f"Fetching result for tool {md.name} - {location}")
+                    response = await client.get(url, timeout=2 * IVCAP_SERVICE_TIMEOUT, headers=headers)
+                    response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+                    job = response.json()
+                    logger.info(f"... result {response.status_code} - {job}")
+                    if response.status_code == 200:
+                        status = job.get("status")
+                        if status == "succeeded":
+                            content = job.get("result-content")
+                            return content
+
+                except httpx.HTTPStatusError as e:
+                    logger.info(f"Tool {md.name} failed with {e}")
+                    err = HTTPException(status_code=e.response.status, detail="tool reply")
+                    ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
+                    raise err
+                except Exception as e:
+                    logger.info(f"Tool {md.name} failed with {e}")
+                    ToolEvent.dispatch_tool_error(span_id, err, md.name, **kwargs)
+                    raise e
 
     tool = FunctionTool(metadata=md, async_fn=afn)
     return _register_function_tool(tool)
@@ -150,7 +232,12 @@ def _load_tool_from_json(d: dict) -> FunctionTool:
     return _register_function_tool(tool)
 
 def _load_meta_from_json(d: dict) -> ToolMetadata:
-    td = ToolDefinition(**d)
+    try:
+        td = ToolDefinition(**d)
+    except Exception as e:
+        logger.warning(f"while parsing tool description '{d.get('id')}' - {e}")
+        raise e
+
     if td.jschema != TOOL_SCHEMA:
         raise ValueError(f"Invalid schema: expected \'{TOOL_SCHEMA}\' but got \'{td.jschema}\'")
     fn_schema = _create_pydantic_model_from_schema(td.fn_schema, td.name)

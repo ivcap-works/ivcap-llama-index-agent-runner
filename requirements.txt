@@ -1,5 +1,6 @@
 llama-index-llms-openai
 llama-index
 fastapi[standard] >= 0.111.1
-git+https://github.com/ivcap-works/ivcap-fastapi.git@main
 python-dotenv
+ivcap-fastapi >= 0.2.0
+ivcap_ai_tool >= 0.5.8

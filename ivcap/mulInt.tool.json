@@ -2,9 +2,9 @@
   "$schema": "urn:sd-core:schema:ai-tool.1",
   "id": "urn:sd-core:llama.builtin.mulInt",
   "name": "mulInt",
-  "service_id": "urn:sd-core:llama.builtin.mulInt",
+  "service-id": "urn:sd-core:llama.builtin.mulInt",
   "description": "Multiply two integers and returns the result integer",
-  "type_signature": "mulInt(a: int, b: int) -> int",
+  "fn_signature": "mulInt(a: int, b: int) -> int",
   "fn_schema": {
     "properties": {
       "a": {

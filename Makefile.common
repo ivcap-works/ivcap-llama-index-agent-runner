@@ -1,0 +1,85 @@
+PROJECT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
+GIT_TAG := $(shell git describe --abbrev=0 --tags ${TAG_COMMIT} 2>/dev/null || true)
+VERSION="${GIT_TAG}|${GIT_COMMIT}|$(shell date -Iminutes)"
+
+TARGET_ARCH := $(shell uname -m)
+TARGET_PLATFORM := linux/${TARGET_ARCH}
+
+DOCKER_USER="$(shell id -u):$(shell id -g)"
+DOCKER_NAME=$(shell echo ${SERVICE_NAME} | sed -E 's/-/_/g')
+DOCKER_VERSION=latest
+DOCKER_TAG=${DOCKER_NAME}:${DOCKER_VERSION}
+
+docker-build: DOCKER_TAG=${DOCKER_NAME}_${TARGET_ARCH}:${DOCKER_VERSION}
+docker-build: TARGET_PLATFORM=linux/${TARGET_ARCH}
+docker-build:
+	@echo "INFO: Building docker image '${DOCKER_TAG}' for '${TARGET_PLATFORM}'"
+	docker buildx build \
+		-t ${DOCKER_TAG} \
+		--platform=${TARGET_PLATFORM} \
+		--build-arg VERSION=${VERSION} \
+		--build-arg BUILD_PLATFORM=${TARGET_PLATFORM} \
+		-f ${PROJECT_DIR}/Dockerfile \
+		--load \
+		${DOCKER_BUILD_ARGS} ${PROJECT_DIR}
+	@echo "\nINFO: Finished building docker image ${DOCKER_TAG}\n"
+
+SERVICE_IMG := ${DOCKER_DEPLOY}
+PUSH_FROM := ""
+SERVICE_ID := urn:ivcap:service:$(shell python3 -c 'import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, "${SERVICE_NAME}" + \
+		"$(shell ivcap context get account-id)"));')
+
+service-register: TARGET_ARCH=amd64
+service-register: DOCKER_VERSION=${GIT_COMMIT}
+service-register: # tool-register # docker-publish
+	@echo "INFO: Registering service '${SERVICE_ID}' with image '${TARGET_ARCH}'"
+	$(eval account_id=$(shell ivcap context get account-id))
+	@if [[ ${account_id} != urn:ivcap:account:* ]]; then echo "ERROR: No IVCAP account found"; exit -1; fi
+	@$(eval image:=$(shell ivcap package list ${DOCKER_NAME}_${TARGET_ARCH}:${DOCKER_VERSION}))
+	@if [[ -z "${image}" ]]; then echo "ERROR: No uploaded docker image '${DOCKER_TAG}' found"; exit -1; fi
+	@echo "ServiceID: ${SERVICE_ID} Image: '${image}'"
+	cat ${PROJECT_DIR}/${IVCAP_SERVICE_FILE} \
+	| sed 's|#DOCKER_IMG#|${image}|' \
+	| sed 's|#SERVICE_ID#|${SERVICE_ID}|' \
+  | ivcap aspect update --policy urn:ivcap:policy:ivcap.open.metadata ${SERVICE_ID} -f - --timeout 600
+
+service-register-minikube:
+	@$(MAKE) TARGET_ARCH=${TARGET_ARCH} service-register
+
+tool-register: #docker-publish
+	$(eval account_id=$(shell ivcap context get account-id))
+	@if [[ ${account_id} != urn:ivcap:account:* ]]; then echo "ERROR: No IVCAP account found"; exit -1; fi
+	$(eval service_id:=urn:ivcap:service:$(shell python3 -c 'import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, \
+        "${SERVICE_NAME}" + "${account_id}"));'))
+	$(eval tool_id:=$(shell docker run --rm ${DOCKER_NAME} --print-tool-description  2>/dev/null | grep "\"id\":" | cut -d\" -f 4 ))
+	@echo "DEBUG: ToolID: ${tool_id} ServiceID: ${service_id} - ${DOCKER_NAME}"
+	@if [[ -z "${tool_id}" ]]; then echo "ERROR: No Tool ID found"; exit -1; fi
+	docker run --rm ${DOCKER_NAME} --print-tool-description  2>/dev/null \
+	| sed 's|#SERVICE_ID#|${service_id}|' \
+	| ivcap aspect update ${service_id} -f - --timeout 600
+
+docker-publish: TARGET_ARCH=amd64
+docker-publish: docker-build
+	@echo "INFO: Publishing docker image '${DOCKER_NAME}_${TARGET_ARCH}:${GIT_COMMIT}' for '${TARGET_ARCH}'"
+	docker tag ${DOCKER_NAME}_${TARGET_ARCH} ${DOCKER_NAME}_${TARGET_ARCH}:${GIT_COMMIT}
+	$(eval size:=$(shell docker inspect ${DOCKER_NAME}_${TARGET_ARCH}:${DOCKER_VERSION} --format='{{.Size}}' | tr -cd '0-9'))
+	$(eval imageSize:=$(shell expr ${size} + 0 ))
+	@echo "... imageSize is ${imageSize}"
+	@$(MAKE) PUSH_FROM="--local " DOCKER_TAG=${DOCKER_NAME}_${TARGET_ARCH}:${GIT_COMMIT} docker-publish-common
+
+docker-publish-minikube:
+	@$(MAKE) TARGET_ARCH=${TARGET_ARCH} docker-publish
+
+docker-publish-common:
+	$(eval log:=$(shell ivcap package push --force ${PUSH_FROM}${DOCKER_TAG} | tee /dev/tty))
+	$(eval SERVICE_IMG := $(shell echo ${log} | sed -E "s/.*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*) pushed/\1/"))
+	@if [ "${SERVICE_IMG}" == "" ] || [ "${SERVICE_IMG}" == "${DOCKER_TAG}" ]; then \
+		echo "service package push failed"; \
+		exit 1; \
+	fi
+	@echo "INFO: Successfully published '${DOCKER_TAG}' as '${SERVICE_IMG}'"
+
+
+.phony: docker-publish docker-publish-minikube

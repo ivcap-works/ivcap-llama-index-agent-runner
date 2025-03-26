@@ -209,7 +209,7 @@ class StepEvent(AgentEvent):
 
     @classmethod
     def from_step_start_event(cls, e: AgentRunStepStartEvent):
-        id = e.step.step_id # uuid4()
+        id = e.step.step_id if e.step != None else uuid4()
         span2ctxt[e.span_id] = id
         ts = e.timestamp
         return cls._from(id, Status.STARTED, ts)
