@@ -43,7 +43,7 @@ service-register: # tool-register # docker-publish
 	cat ${PROJECT_DIR}/${IVCAP_SERVICE_FILE} \
 	| sed 's|#DOCKER_IMG#|${image}|' \
 	| sed 's|#SERVICE_ID#|${SERVICE_ID}|' \
-  | ivcap aspect update ${SERVICE_ID} -f - --timeout 600
+  | ivcap aspect update --policy urn:ivcap:policy:ivcap.open.metadata ${SERVICE_ID} -f - --timeout 600
 
 service-register-minikube:
 	@$(MAKE) TARGET_ARCH=${TARGET_ARCH} service-register

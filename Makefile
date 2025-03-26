@@ -23,51 +23,58 @@ run-with-proxy:
 run-litellm:
 	env $(shell cat .env | xargs) litellm --port 4000 -m gpt-3.5-turbo -m gpt-4
 
-# test-echo:
-# 	curl -i -X POST -H "content-type: application/json" --data "{\"echo\": \"Hello World!\"}" http://${HOST}:${PORT}/
-
-# test-echo-with-sleep:
-# 	curl -i -X POST -H "content-type: application/json" --data "{\"echo\": \"Hello World!\", \"sleep\":5}" http://${HOST}:${PORT}
-
-# test-echo-with-auth:
-# 	curl -i -X POST \
-# 		-H "content-type: application/json" \
-# 		-H "Authorization: Bearer $(shell ivcap context get access-token --refresh-token)" \
-# 		--data "{\"echo\": \"Hello World!\"}" http://${HOST}:${PORT}/
-
-
 test-simple:
+	TOKEN=$(shell ivcap context get access-token --refresh-token); \
 	curl -i -X POST \
 	-H "content-type: application/json" \
 	-H "Timeout: 60" \
-	-H "Authorization: Bearer $(shell ivcap context get access-token --refresh-token)" \
+	-H "Authorization: Bearer $$TOKEN" \
 	--data @${PROJECT_DIR}/tests/simple_query.json \
 	http://${HOST}:${PORT}
 
 test-is-prime:
+	TOKEN=$(shell ivcap context get access-token --refresh-token); \
 	curl -i -X POST \
 	-H "content-type: application/json" \
 	-H "Timeout: 600" \
-	-H "Authorization: Bearer $(shell ivcap context get access-token --refresh-token)" \
+	-H "Authorization: $$TOKEN" \
 	--data @${PROJECT_DIR}/tests/is_prime.json \
 	http://${HOST}:${PORT}
 
 test-is-prime-minikube:
+	TOKEN=$(shell ivcap --context minikube context get access-token --refresh-token); \
 	curl -i -X POST \
 	-H "content-type: application/json" \
-	-H "Timeout: 600" \
-	-H "Authorization: Bearer $(shell ivcap context get access-token --refresh-token)" \
+	-H "Timeout: 10" \
+	-H "Authorization: Bearer $$TOKEN" \
 	--data @${PROJECT_DIR}/tests/is_prime.json \
 	http://ivcap.minikube/1/services2/${SERVICE_ID}/jobs
 
 test-is-prime-ivcap:
+	TOKEN=$(shell ivcap --context gke-dev context get access-token --refresh-token); \
 	curl -i -X POST \
 	-H "content-type: application/json" \
-	-H "Timeout: 600" \
-	-H "Authorization: Bearer $(shell ivcap --context gke-dev context get access-token --refresh-token)" \
+	-H "Timeout: 10" \
+	-H "Authorization: Bearer $$TOKEN" \
 	--data @${PROJECT_DIR}/tests/is_prime.json \
 	https://develop.ivcap.net/1/services2/${SERVICE_ID}/jobs
 
+JOB_ID=00000000-0000-0000-0000-000000000000
+test-get-result-ivcap:
+	TOKEN=$(shell ivcap --context gke-dev context get access-token --refresh-token); \
+	curl \
+	-H "content-type: application/json" \
+	-H "Timeout: 20" \
+	-H "Authorization: Bearer $$TOKEN" \
+	https://develop.ivcap.net/1/services2/${SERVICE_ID}/jobs/${JOB_ID}?with-result-content=true | jq
+
+test-services-list-ivcap:
+	TOKEN=$(shell ivcap --context gke-dev context get access-token --refresh-token); \
+	curl \
+	-H "content-type: application/json" \
+	-H "Timeout: 20" \
+	-H "Authorization: Bearer $$TOKEN" \
+	https://develop.ivcap.net/1/services2 | jq
 
 install:
 	pip install -r requirements.txt

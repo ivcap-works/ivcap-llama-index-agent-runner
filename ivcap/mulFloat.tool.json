@@ -2,9 +2,9 @@
   "$schema": "urn:sd-core:schema:ai-tool.1",
   "id": "urn:sd-core:llama.builtin.mulFloat",
   "name": "mulFloat",
-  "service_id": "urn:sd-core:llama.builtin.mulFloat",
+  "service-id": "urn:sd-core:llama.builtin.mulFloat",
   "description": "Multiply two float numbers and returns the result as float",
-  "type_signature": "mulFloat(a: int, b: int) -> int",
+  "fn_signature": "mulFloat(a: int, b: int) -> int",
   "fn_schema": {
     "properties": {
       "a": {

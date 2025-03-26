@@ -13,6 +13,7 @@ from llama_index.core.tools import BaseTool, FunctionTool
 
 import os
 import logging
+from pydantic import ConfigDict
 import requests
 
 from events import ToolEvent
@@ -32,6 +33,9 @@ class ToolDefinition(BaseModel):
     description: str
     fn_signature: str
     fn_schema: dict
+
+    model_config = ConfigDict(populate_by_name=True) # Allow using `service_id`
+
 
 override_fns: dict[str, Callable[..., Any]] = {}
 tools: dict[str, BaseTool] = {}

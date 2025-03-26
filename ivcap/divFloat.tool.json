@@ -2,9 +2,9 @@
   "$schema": "urn:sd-core:schema:ai-tool.1",
   "id": "urn:sd-core:llama.builtin.divFloat",
   "name": "divFloat",
-  "service_id": "urn:sd-core:llama.builtin.divFloat",
+  "service-id": "urn:sd-core:llama.builtin.divFloat",
   "description": "Divide two float numbers and returns the result as float",
-  "type_signature": "divFloat(a: int, b: int) -> int",
+  "fn_signature": "divFloat(a: int, b: int) -> int",
   "fn_schema": {
     "properties": {
       "a": {

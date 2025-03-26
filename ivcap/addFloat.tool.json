@@ -2,9 +2,9 @@
   "$schema": "urn:sd-core:schema:ai-tool.1",
   "id": "urn:sd-core:llama.builtin.addFloat",
   "name": "addFloat",
-  "service_id": "urn:sd-core:llama.builtin.addFloat",
+  "service-id": "urn:sd-core:llama.builtin.addFloat",
   "description": "Add two float numbers and returns the result as float",
-  "type_signature": "addFloat(a: float, b: float) -> float",
+  "fn_signature": "addFloat(a: float, b: float) -> float",
   "fn_schema": {
     "properties": {
       "a": {
